@@ -9,6 +9,9 @@
 
 namespace WP_API_Codeia;
 
+use WP_API_Codeia\Middleware\Middleware_Pipeline;
+use WP_API_Codeia\Utils\Query_Param_Manager;
+
 /**
  * Class Endpoint_Manager
  *
@@ -225,7 +228,74 @@ class Endpoint_Manager {
      * @return API_Response Respuesta
      */
     private function handle_post(API_Request $request, array $endpoint_config): API_Response {
-        return $this->error('Método POST no implementado aún', 501);
+        // Obtener datos del body
+        $body = $request->get_body();
+
+        if (empty($body)) {
+            return $this->error('No se proporcionaron datos', 400);
+        }
+
+        $post_types = $endpoint_config['post_types'] ?? ['post'];
+        $post_type = $body['post_type'] ?? $post_types[0];
+
+        if (!in_array($post_type, $post_types, true)) {
+            return $this->error('Post type no permitido', 400);
+        }
+
+        // Verificar permisos
+        $auth = wp_api_codeia_auth();
+        $user = $auth->get_current_user();
+
+        if (!$user || !user_can($user, 'publish_posts')) {
+            return $this->error('No tienes permiso para crear posts', 403);
+        }
+
+        // Preparar datos del post
+        $post_data = [
+            'post_title'   => $body['title'] ?? '',
+            'post_content' => $body['content'] ?? '',
+            'post_excerpt' => $body['excerpt'] ?? '',
+            'post_status'  => $body['status'] ?? 'draft',
+            'post_type'    => $post_type,
+            'post_author'  => $user->ID,
+        ];
+
+        // Insertar post
+        $post_id = wp_insert_post($post_data, true);
+
+        if (is_wp_error($post_id)) {
+            return $this->error($post_id->get_error_message(), 400);
+        }
+
+        // Guardar campos custom (ACF, meta, etc.)
+        if (isset($body['meta']) && is_array($body['meta'])) {
+            foreach ($body['meta'] as $key => $value) {
+                update_post_meta($post_id, $key, $value);
+            }
+        }
+
+        // Guardar campos ACF
+        if (isset($body['acf']) && is_array($body['acf']) && function_exists('update_field')) {
+            foreach ($body['acf'] as $key => $value) {
+                update_field($key, $value, $post_id);
+            }
+        }
+
+        // Guardar términos
+        if (isset($body['terms']) && is_array($body['terms'])) {
+            foreach ($body['terms'] as $taxonomy => $terms) {
+                wp_set_object_terms($post_id, $terms, $taxonomy);
+            }
+        }
+
+        // Invalidar cache
+        wp_api_codeia()->get_cache_manager()->invalidate_post_cache($post_id);
+
+        // Retornar el post creado
+        $post = get_post($post_id);
+        $fields = $endpoint_config['fields']['include'] ?? [];
+
+        return new API_Response($this->format_post($post, $fields), 201);
     }
 
     /**
@@ -236,7 +306,90 @@ class Endpoint_Manager {
      * @return API_Response Respuesta
      */
     private function handle_put(API_Request $request, array $endpoint_config): API_Response {
-        return $this->error('Método PUT no implementado aún', 501);
+        $item_id = $request->get_item_id();
+
+        if (!$item_id) {
+            return $this->error('ID de item no proporcionado', 400);
+        }
+
+        $post = get_post($item_id);
+
+        if ($post === null) {
+            return $this->error('Post no encontrado', 404);
+        }
+
+        // Verificar permisos
+        $auth = wp_api_codeia_auth();
+        $user = $auth->get_current_user();
+
+        if (!$user || !user_can($user, 'edit_post', $item_id)) {
+            return $this->error('No tienes permiso para editar este post', 403);
+        }
+
+        // Obtener datos del body
+        $body = $request->get_body();
+
+        if (empty($body)) {
+            return $this->error('No se proporcionaron datos', 400);
+        }
+
+        // Preparar datos del post
+        $post_data = [
+            'ID' => $item_id,
+        ];
+
+        if (isset($body['title'])) {
+            $post_data['post_title'] = $body['title'];
+        }
+
+        if (isset($body['content'])) {
+            $post_data['post_content'] = $body['content'];
+        }
+
+        if (isset($body['excerpt'])) {
+            $post_data['post_excerpt'] = $body['excerpt'];
+        }
+
+        if (isset($body['status'])) {
+            $post_data['post_status'] = $body['status'];
+        }
+
+        // Actualizar post
+        $result = wp_update_post($post_data, true);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 400);
+        }
+
+        // Guardar campos custom (ACF, meta, etc.)
+        if (isset($body['meta']) && is_array($body['meta'])) {
+            foreach ($body['meta'] as $key => $value) {
+                update_post_meta($item_id, $key, $value);
+            }
+        }
+
+        // Guardar campos ACF
+        if (isset($body['acf']) && is_array($body['acf']) && function_exists('update_field')) {
+            foreach ($body['acf'] as $key => $value) {
+                update_field($key, $value, $item_id);
+            }
+        }
+
+        // Guardar términos
+        if (isset($body['terms']) && is_array($body['terms'])) {
+            foreach ($body['terms'] as $taxonomy => $terms) {
+                wp_set_object_terms($item_id, $terms, $taxonomy);
+            }
+        }
+
+        // Invalidar cache
+        wp_api_codeia()->get_cache_manager()->invalidate_post_cache($item_id);
+
+        // Retornar el post actualizado
+        $post = get_post($item_id);
+        $fields = $endpoint_config['fields']['include'] ?? [];
+
+        return new API_Response($this->format_post($post, $fields));
     }
 
     /**
@@ -247,7 +400,41 @@ class Endpoint_Manager {
      * @return API_Response Respuesta
      */
     private function handle_delete(API_Request $request, array $endpoint_config): API_Response {
-        return $this->error('Método DELETE no implementado aún', 501);
+        $item_id = $request->get_item_id();
+
+        if (!$item_id) {
+            return $this->error('ID de item no proporcionado', 400);
+        }
+
+        $post = get_post($item_id);
+
+        if ($post === null) {
+            return $this->error('Post no encontrado', 404);
+        }
+
+        // Verificar permisos
+        $auth = wp_api_codeia_auth();
+        $user = $auth->get_current_user();
+
+        if (!$user || !user_can($user, 'delete_post', $item_id)) {
+            return $this->error('No tienes permiso para eliminar este post', 403);
+        }
+
+        // Invalidar cache antes de borrar
+        wp_api_codeia()->get_cache_manager()->invalidate_post_cache($item_id);
+
+        // Eliminar post (a papelera)
+        $result = wp_trash_post($item_id);
+
+        if (!$result) {
+            return $this->error('Error al eliminar el post', 500);
+        }
+
+        return new API_Response([
+            'success' => true,
+            'message' => 'Post movido a papelera',
+            'id' => $item_id,
+        ]);
     }
 
     /**
@@ -328,6 +515,8 @@ class API_Request {
     private string $version;
     private string $endpoint;
     private ?string $item_id;
+    private ?array $body = null;
+    private ?array $params = null;
 
     public function __construct(string $version, string $endpoint, ?string $item_id = null) {
         $this->version = $version;
@@ -345,6 +534,107 @@ class API_Request {
 
     public function get_item_id(): ?string {
         return $this->item_id;
+    }
+
+    /**
+     * Obtener método HTTP
+     *
+     * @return string
+     */
+    public function get_method(): string {
+        return strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+    }
+
+    /**
+     * Obtener identificador único para rate limiting
+     *
+     * @return string
+     */
+    public function get_identifier(): string {
+        $auth = wp_api_codeia_auth();
+        $user = $auth->get_current_user();
+
+        if ($user) {
+            return 'user_' . $user->ID;
+        }
+
+        $auth_data = $auth->get_auth_data();
+        if ($auth_data && isset($auth_data['key_id'])) {
+            return 'key_' . $auth_data['key_id'];
+        }
+
+        return 'ip_' . wp_api_codeia_get_client_ip();
+    }
+
+    /**
+     * Obtener clave de cache
+     *
+     * @return string
+     */
+    public function get_cache_key(): string {
+        $key_parts = [
+            $this->endpoint,
+            $this->version,
+            $this->get_method(),
+        ];
+
+        if ($this->item_id) {
+            $key_parts[] = $this->item_id;
+        }
+
+        $params = $this->get_params();
+        if (isset($params['page'])) {
+            $key_parts[] = 'p' . $params['page'];
+        }
+        if (isset($params['per_page'])) {
+            $key_parts[] = 'pp' . $params['per_page'];
+        }
+
+        return implode('_', $key_parts);
+    }
+
+    /**
+     * Obtener parámetros de la request
+     *
+     * @return array
+     */
+    public function get_params(): array {
+        if ($this->params === null) {
+            $this->params = $_GET + $_POST;
+        }
+
+        return $this->params;
+    }
+
+    /**
+     * Obtener un parámetro específico
+     *
+     * @param string     $key     Clave del parámetro
+     * @param mixed|null $default Valor por defecto
+     * @return mixed
+     */
+    public function get_param(string $key, $default = null) {
+        $params = $this->get_params();
+
+        return $params[$key] ?? $default;
+    }
+
+    /**
+     * Obtener body de la request (para POST/PUT)
+     *
+     * @return array
+     */
+    public function get_body(): array {
+        if ($this->body === null) {
+            $raw_body = file_get_contents('php://input');
+            $this->body = json_decode($raw_body, true) ?? [];
+
+            if (empty($this->body) && !empty($_POST)) {
+                $this->body = $_POST;
+            }
+        }
+
+        return $this->body;
     }
 }
 
@@ -384,5 +674,15 @@ class API_Response {
 
     public function get_data() {
         return $this->data;
+    }
+
+    /**
+     * Establecer datos de la respuesta
+     *
+     * @param mixed $data Nuevos datos
+     * @return void
+     */
+    public function set_data($data): void {
+        $this->data = $data;
     }
 }

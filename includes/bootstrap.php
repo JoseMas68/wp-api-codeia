@@ -9,6 +9,9 @@
 
 namespace WP_API_Codeia;
 
+use WP_API_Codeia\Middleware\Middleware_Pipeline;
+use WP_API_Codeia\Middleware\CORS_Manager;
+
 /**
  * Class Bootstrap
  *
@@ -80,6 +83,20 @@ class Bootstrap {
     private ?Request_Logger $request_logger = null;
 
     /**
+     * Instancia del Middleware Pipeline
+     *
+     * @var Middleware_Pipeline|null
+     */
+    private ?Middleware_Pipeline $middleware_pipeline = null;
+
+    /**
+     * Instancia del CORS Manager
+     *
+     * @var CORS_Manager|null
+     */
+    private ?CORS_Manager $cors_manager = null;
+
+    /**
      * Constructor privado (Singleton pattern)
      */
     private function __construct() {
@@ -131,6 +148,12 @@ class Bootstrap {
 
         // Inicializar Request Logger
         $this->init_request_logger();
+
+        // Inicializar Middleware Pipeline
+        $this->init_middleware_pipeline();
+
+        // Inicializar CORS Manager
+        $this->init_cors_manager();
 
         // Inicializar Admin Dashboard
         if (is_admin()) {
@@ -232,6 +255,28 @@ class Bootstrap {
     private function init_request_logger(): void {
         $this->request_logger = new Request_Logger();
         $this->request_logger->init();
+    }
+
+    /**
+     * Inicializar el Middleware Pipeline
+     *
+     * @return void
+     */
+    private function init_middleware_pipeline(): void {
+        $this->middleware_pipeline = Middleware_Pipeline::create_default();
+    }
+
+    /**
+     * Inicializar el CORS Manager
+     *
+     * @return void
+     */
+    private function init_cors_manager(): void {
+        $this->cors_manager = new CORS_Manager();
+        $this->cors_manager->init();
+
+        // Agregar action para enviar headers CORS
+        add_action('wp_api_codeia_send_response', [$this->cors_manager, 'add_cors_headers']);
     }
 
     /**
@@ -338,9 +383,18 @@ class Bootstrap {
         }
 
         try {
-            // Crear y procesar la request
+            // Crear la request
             $request = new API_Request($version, $endpoint_slug, $item_id);
-            $response = $this->endpoint_manager->process_request($request);
+
+            // Procesar a través del middleware pipeline
+            // El endpoint manager es el handler final
+            $response = $this->middleware_pipeline->process_request(
+                $request,
+                [$this->endpoint_manager, 'process_request']
+            );
+
+            // Aplicar headers CORS a la response
+            do_action('wp_api_codeia_send_response');
 
             // Enviar respuesta
             $response->send();
@@ -441,5 +495,23 @@ class Bootstrap {
      */
     public function get_request_logger(): Request_Logger {
         return $this->request_logger;
+    }
+
+    /**
+     * Obtener el Middleware Pipeline
+     *
+     * @return Middleware_Pipeline
+     */
+    public function get_middleware_pipeline(): Middleware_Pipeline {
+        return $this->middleware_pipeline ?? Middleware_Pipeline::create_default();
+    }
+
+    /**
+     * Obtener el CORS Manager
+     *
+     * @return CORS_Manager
+     */
+    public function get_cors_manager(): CORS_Manager {
+        return $this->cors_manager ?? new CORS_Manager();
     }
 }
