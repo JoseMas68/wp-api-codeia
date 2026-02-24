@@ -195,7 +195,13 @@ class Cache_Manager {
         $config = $this->get_group_config($group);
 
         if ($config['strategy'] === 'object') {
-            return wp_cache_flush_group($this->prefix . $group);
+            // wp_cache_flush_group solo está disponible en WP 6.1+
+            if (function_exists('wp_cache_flush_group')) {
+                return wp_cache_flush_group($this->prefix . $group);
+            }
+            // Fallback: limpiar todo el object cache
+            wp_cache_flush();
+            return true;
         }
 
         // Para transients, necesitamos rastrear las keys

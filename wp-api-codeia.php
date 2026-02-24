@@ -55,10 +55,41 @@ function wp_api_codeia_autoloader($class) {
     // Obtener el nombre relativo de la clase
     $relative_class = substr($class, $len);
 
+    // Mapeo de namespaces a subcarpetas específicas
+    $namespace_map = [
+        'Auth\\' => 'auth/',
+        'Repositories\\' => 'repositories/',
+        'Detectors\\' => 'detectors/',
+        'Endpoints\\' => 'endpoints/',
+        'Permissions\\' => 'permissions/',
+        'Middleware\\' => 'middleware/',
+        'Utils\\' => 'utils/',
+        'Performance\\' => 'performance/',
+    ];
+
     // Convertir namespace a ruta de archivo
-    $file = WP_API_CODEIA_INCLUDES_DIR .
-            str_replace('\\', '/', strtolower($relative_class)) .
-            '.php';
+    $file_path = str_replace('\\', '/', $relative_class);
+    $file_path_lower = strtolower($file_path);
+
+    // Verificar si coincide con algún namespace específico
+    foreach ($namespace_map as $namespace => $subfolder) {
+        $namespace_prefix = str_replace('\\', '/', $namespace);
+        if (strpos($file_path_lower, $namespace_prefix) === 0) {
+            // Extraer el nombre de la clase
+            $class_name = substr($file_path, strlen($namespace_prefix));
+            // Convertir a formato archivo (Class_Name -> class-name)
+            $class_file = strtolower(str_replace('_', '-', $class_name));
+            $file = WP_API_CODEIA_INCLUDES_DIR . $subfolder . $class_file . '.php';
+
+            if (file_exists($file)) {
+                require_once $file;
+                return;
+            }
+        }
+    }
+
+    // Fallback al método original (para clases en raíz de includes/)
+    $file = WP_API_CODEIA_INCLUDES_DIR . $file_path_lower . '.php';
 
     // Si el archivo existe, requerirlo
     if (file_exists($file)) {

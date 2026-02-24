@@ -264,8 +264,13 @@ class Auth_Manager {
             return null;
         }
 
-        // Verificar application password
-        if (!wp_check_application_password($user, $app_password)) {
+        // Verificar application password (solo disponible en WP 5.6+)
+        if (function_exists('wp_check_application_password')) {
+            if (!wp_check_application_password($user, $app_password)) {
+                return null;
+            }
+        } else {
+            // Fallback para versiones anteriores
             return null;
         }
 
