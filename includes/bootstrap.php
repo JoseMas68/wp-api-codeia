@@ -11,6 +11,8 @@ namespace WP_API_Codeia;
 
 use WP_API_Codeia\Middleware\Middleware_Pipeline;
 use WP_API_Codeia\Middleware\CORS_Manager;
+use WP_API_Codeia\Admin\Admin_Page;
+use WP_API_Codeia\Admin\AJAX_Handlers;
 
 /**
  * Class Bootstrap
@@ -284,9 +286,17 @@ class Bootstrap {
      *
      * @return void
      */
+    /**
+     * Inicializar el Admin Dashboard
+     *
+     * @return void
+     */
     private function init_admin(): void {
-        $admin = new Admin\Dashboard();
-        $admin->init();
+        $admin_page = new Admin_Page();
+        $admin_page->init();
+
+        $ajax_handlers = new AJAX_Handlers();
+        $ajax_handlers->init();
     }
 
     /**
