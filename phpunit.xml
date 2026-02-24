@@ -1,0 +1,25 @@
+<phpunit
+    bootstrap="tests/bootstrap.php"
+    testSuite="WP API Codeia"
+    colors="true"
+    stopOnFailure="false"
+    beStrictAboutOutputDuringTests="true"
+    beStrictAboutTestsThatDoNotTestAnything="true"
+>
+    <testsuites>
+        <testsuite name="Unit Tests">
+            <directory>tests/unit</directory>
+        </testsuite>
+        <testsuite name="Integration Tests">
+            <directory>tests/integration</directory>
+        </testsuite>
+    </testsuites>
+    <coverage>
+        <include>
+            <directory suffix=".php">includes</directory>
+        </include>
+        <exclude>
+            <directory>includes/vendor</directory>
+        </exclude>
+    </coverage>
+</phpunit>
