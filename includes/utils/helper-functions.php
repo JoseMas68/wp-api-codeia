@@ -314,3 +314,247 @@ function wp_api_codeia_get_debug_info(): array {
         'locale' => get_locale(),
     ];
 }
+
+/**
+ * Obtener el Field Permission Manager
+ *
+ * @return \WP_API_Codeia\Permissions\Field_Permission_Manager
+ */
+function wp_api_codeia_field_permissions(): \WP_API_Codeia\Permissions\Field_Permission_Manager {
+    return new \WP_API_Codeia\Permissions\Field_Permission_Manager();
+}
+
+/**
+ * Obtener el Rate Limiter
+ *
+ * @return \WP_API_Codeia\Middleware\Rate_Limiter
+ */
+function wp_api_codeia_rate_limiter(): \WP_API_Codeia\Middleware\Rate_Limiter {
+    return new \WP_API_Codeia\Middleware\Rate_Limiter();
+}
+
+/**
+ * Obtener el CORS Manager
+ *
+ * @return \WP_API_Codeia\Middleware\CORS_Manager
+ */
+function wp_api_codeia_cors(): \WP_API_Codeia\Middleware\CORS_Manager {
+    return new \WP_API_Codeia\Middleware\CORS_Manager();
+}
+
+/**
+ * Obtener el Media Handler
+ *
+ * @return \WP_API_Codeia\Utils\Media_Handler
+ */
+function wp_api_codeia_media(): \WP_API_Codeia\Utils\Media_Handler {
+    return new \WP_API_Codeia\Utils\Media_Handler();
+}
+
+/**
+ * Obtener el Query Param Manager
+ *
+ * @return \WP_API_Codeia\Utils\Query_Param_Manager
+ */
+function wp_api_codeia_query_params(): \WP_API_Codeia\Utils\Query_Param_Manager {
+    return new \WP_API_Codeia\Utils\Query_Param_Manager();
+}
+
+/**
+ * Verificar si ACF está activo
+ *
+ * @return bool
+ */
+function wp_api_codeia_is_acf_active(): bool {
+    return wp_api_codeia_is_plugin_active('advanced-custom-fields/acf.php') ||
+           class_exists('ACF');
+}
+
+/**
+ * Verificar si JetEngine está activo
+ *
+ * @return bool
+ */
+function wp_api_codeia_is_jetengine_active(): bool {
+    return wp_api_codeia_is_plugin_active('jet-engine/jet-engine.php') ||
+           defined('JET_ENGINE_VERSION');
+}
+
+/**
+ * Generar string aleatorio
+ *
+ * @param int $length Longitud del string
+ * @return string String aleatorio
+ */
+function wp_api_codeia_random_string(int $length = 16): string {
+    $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    $random_string = '';
+
+    for ($i = 0; $i < $length; $i++) {
+        $random_string .= $characters[random_int(0, strlen($characters) - 1)];
+    }
+
+    return $random_string;
+}
+
+/**
+ * Sanitizar respuesta de API
+ *
+ * @param mixed $data Datos a sanitizar
+ * @return mixed Datos sanitizados
+ */
+function wp_api_codeia_sanitize_api_response($data) {
+    if (is_array($data)) {
+        return array_map('wp_api_codeia_sanitize_api_response', $data);
+    } elseif (is_object($data)) {
+        return array_map('wp_api_codeia_sanitize_api_response', get_object_vars($data));
+    } elseif (is_string($data)) {
+        return sanitize_text_field($data);
+    }
+
+    return $data;
+}
+
+/**
+ * Formatear respuesta de error para API
+ *
+ * @param string|\WP_Error $error Error o mensaje
+ * @param int              $status Código HTTP
+ * @return array Respuesta formateada
+ */
+function wp_api_codeia_format_error($error, int $status = 400): array {
+    if (is_wp_error($error)) {
+        return [
+            'success' => false,
+            'code' => $error->get_error_code(),
+            'message' => $error->get_error_message(),
+            'data' => $error->get_error_data(),
+        ];
+    }
+
+    return [
+        'success' => false,
+        'code' => 'error',
+        'message' => $error,
+        'data' => ['status' => $status],
+    ];
+}
+
+/**
+ * Obtener configuración de JWT
+ *
+ * @return array Configuración de JWT
+ */
+function wp_api_codeia_get_jwt_config(): array {
+    return [
+        'secret_key' => get_option('wp_api_codeia_jwt_secret'),
+        'token_lifetime' => get_option('wp_api_codeia_jwt_token_lifetime', 3600),
+        'refresh_lifetime' => get_option('wp_api_codeia_jwt_refresh_lifetime', 2592000),
+    ];
+}
+
+/**
+ * Verificar si un endpoint requiere autenticación
+ *
+ * @param string $endpoint Slug del endpoint
+ * @param string $version   Versión de la API
+ * @return bool True si requiere autenticación
+ */
+function wp_api_codeia_endpoint_requires_auth(string $endpoint, string $version = 'v1'): bool {
+    $config = wp_api_codeia_config()->get_endpoint_config($endpoint, $version);
+
+    if ($config === null) {
+        return true; // Por defecto, requerir auth
+    }
+
+    return ($config['auth'] ?? 'api_key') !== 'none';
+}
+
+/**
+ * Obtener scope máximo de un usuario
+ *
+ * @param int $user_id ID del usuario
+ * @return string Scope máximo (read, write, read_write, admin)
+ */
+function wp_api_codeia_get_user_max_scope(int $user_id): string {
+    $user = get_userdata($user_id);
+
+    if (!$user) {
+        return 'read';
+    }
+
+    // Admin tiene scope admin
+    if (user_can($user, 'manage_options')) {
+        return 'admin';
+    }
+
+    // Editores tienen read_write
+    if (user_can($user, 'edit_posts')) {
+        return 'read_write';
+    }
+
+    // Colaboradores tienen write
+    if (user_can($user, 'edit_posts')) {
+        return 'write';
+    }
+
+    // Suscriptores solo tienen read
+    return 'read';
+}
+
+/**
+ * Verificar si un request es una petición de API
+ *
+ * @return bool True si es petición de API
+ */
+function wp_api_codeia_is_api_request(): bool {
+    $namespace = trim(WP_API_CODEIA_NAMESPACE, '/');
+
+    return isset($_SERVER['REQUEST_URI']) &&
+           strpos($_SERVER['REQUEST_URI'], '/' . $namespace . '/') !== false;
+}
+
+/**
+ * Obtener IP del cliente
+ *
+ * @return string IP del cliente
+ */
+function wp_api_codeia_get_client_ip(): string {
+    $ip = '';
+
+    if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+        $ip = $_SERVER['HTTP_CLIENT_IP'];
+    } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
+    } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
+        $ip = $_SERVER['REMOTE_ADDR'];
+    }
+
+    return sanitize_text_field($ip);
+}
+
+/**
+ * Validar formato de email
+ *
+ * @param string $email Email a validar
+ * @return bool True si es válido
+ */
+function wp_api_codeia_validate_email(string $email): bool {
+    return is_email($email) !== false;
+}
+
+/**
+ * Truncar texto
+ *
+ * @param string $text   Texto a truncar
+ * @param int    $length Longitud máxima
+ * @param string $suffix Sufijo a agregar
+ * @return string Texto truncado
+ */
+function wp_api_codeia_truncate(string $text, int $length, string $suffix = '...'): string {
+    if (strlen($text) <= $length) {
+        return $text;
+    }
+
+    return substr($text, 0, $length - strlen($suffix)) . $suffix;
+}

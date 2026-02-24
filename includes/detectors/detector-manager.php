@@ -9,12 +9,29 @@
 
 namespace WP_API_Codeia;
 
+use WP_API_Codeia\Detectors\ACF_Detector;
+use WP_API_Codeia\Detectors\JetEngine_Detector;
+
 /**
  * Class Detector_Manager
  *
  * @package WP_API_Codeia
  */
 class Detector_Manager {
+
+    /**
+     * Instancia de ACF Detector
+     *
+     * @var ACF_Detector|null
+     */
+    private ?ACF_Detector $acf_detector = null;
+
+    /**
+     * Instancia de JetEngine Detector
+     *
+     * @var JetEngine_Detector|null
+     */
+    private ?JetEngine_Detector $jetengine_detector = null;
 
     /**
      * Inicializar el detector manager
@@ -26,6 +43,47 @@ class Detector_Manager {
         add_action('init', [$this, 'detect_all'], 999);
         add_action('registered_post_type', [$this, 'invalidate_cpt_cache']);
         add_action('registered_taxonomy', [$this, 'invalidate_taxonomy_cache']);
+
+        // Inicializar detectores de plugins de terceros
+        $this->init_third_party_detectors();
+    }
+
+    /**
+     * Inicializar detectores de plugins de terceros
+     *
+     * @return void
+     */
+    private function init_third_party_detectors(): void {
+        // ACF Detector
+        if ($this->is_acf_active()) {
+            $this->acf_detector = new ACF_Detector();
+            add_action('acf/update_field_group', [$this, 'invalidate_acf_cache']);
+        }
+
+        // JetEngine Detector
+        if ($this->is_jetengine_active()) {
+            $this->jetengine_detector = new JetEngine_Detector();
+        }
+    }
+
+    /**
+     * Verificar si ACF está activo
+     *
+     * @return bool
+     */
+    private function is_acf_active(): bool {
+        return wp_api_codeia_is_plugin_active('advanced-custom-fields/acf.php') ||
+               class_exists('ACF');
+    }
+
+    /**
+     * Verificar si JetEngine está activo
+     *
+     * @return bool
+     */
+    private function is_jetengine_active(): bool {
+        return wp_api_codeia_is_plugin_active('jet-engine/jet-engine.php') ||
+               class_exists('Jet_Engine');
     }
 
     /**
@@ -37,6 +95,14 @@ class Detector_Manager {
         $this->detect_cpts();
         $this->detect_taxonomies();
         $this->detect_meta_fields();
+
+        // Detectar campos de plugins de terceros
+        if ($this->acf_detector) {
+            $this->acf_detector->detect();
+        }
+        if ($this->jetengine_detector) {
+            $this->jetengine_detector->detect();
+        }
     }
 
     /**
@@ -167,5 +233,62 @@ class Detector_Manager {
      */
     public function invalidate_taxonomy_cache(): void {
         delete_transient('wp_api_codeia_taxonomies');
+    }
+
+    /**
+     * Invalidar cache de ACF
+     *
+     * @return void
+     */
+    public function invalidate_acf_cache(): void {
+        if ($this->acf_detector) {
+            $this->acf_detector->invalidate_cache();
+        }
+    }
+
+    /**
+     * Obtener detector ACF
+     *
+     * @return ACF_Detector|null
+     */
+    public function get_acf_detector(): ?ACF_Detector {
+        return $this->acf_detector;
+    }
+
+    /**
+     * Obtener detector JetEngine
+     *
+     * @return JetEngine_Detector|null
+     */
+    public function get_jetengine_detector(): ?JetEngine_Detector {
+        return $this->jetengine_detector;
+    }
+
+    /**
+     * Obtener todos los campos personalizados (incluyendo ACF y JetEngine)
+     *
+     * @param string $post_type Post type
+     * @return array Todos los campos para el post type
+     */
+    public function get_all_custom_fields(string $post_type): array {
+        $fields = [];
+
+        // Meta fields nativos
+        $meta_fields = $this->detect_meta_fields();
+        if (isset($meta_fields[$post_type])) {
+            $fields['native'] = $meta_fields[$post_type];
+        }
+
+        // Campos ACF
+        if ($this->acf_detector && $this->acf_detector->is_acf_active()) {
+            $fields['acf'] = $this->acf_detector->get_fields_for_post_type($post_type);
+        }
+
+        // Campos JetEngine
+        if ($this->jetengine_detector && $this->jetengine_detector->is_jetengine_active()) {
+            $fields['jetengine'] = $this->jetengine_detector->get_fields_for_post_type($post_type);
+        }
+
+        return $fields;
     }
 }

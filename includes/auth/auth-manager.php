@@ -10,6 +10,7 @@
 namespace WP_API_Codeia;
 
 use WP_API_Codeia\Repositories\Auth_Key_Repository;
+use WP_API_Codeia\Auth\JWT_Handler;
 
 /**
  * Class Auth_Manager
@@ -163,8 +164,52 @@ class Auth_Manager {
      * @return array|null Datos de autenticación o null
      */
     private function auth_with_jwt(): ?array {
-        // TODO: Implementar JWT authentication
-        return null;
+        // Obtener token del header Authorization
+        $token = $this->get_jwt_from_header();
+
+        if (empty($token)) {
+            // Intentar obtener de cookie
+            $token = $_COOKIE['wp_api_codeia_jwt'] ?? '';
+        }
+
+        if (empty($token)) {
+            return null;
+        }
+
+        $jwt_handler = new JWT_Handler();
+
+        // Decodificar token
+        $payload = $jwt_handler->decode($token);
+
+        if ($payload === false) {
+            return null;
+        }
+
+        // Verificar si el token está en blacklist
+        if ($jwt_handler->is_token_blacklisted($payload)) {
+            return null;
+        }
+
+        // Verificar que el usuario existe
+        $user_id = $payload['sub'] ?? null;
+
+        if ($user_id === null) {
+            return null;
+        }
+
+        $user = get_userdata($user_id);
+
+        if ($user === false) {
+            return null;
+        }
+
+        return [
+            'user' => $user,
+            'method' => 'jwt',
+            'scope' => $payload['scope'] ?? 'read_write',
+            'jti' => $payload['jti'] ?? '',
+            'exp' => $payload['exp'] ?? 0,
+        ];
     }
 
     /**
@@ -305,5 +350,94 @@ class Auth_Manager {
     public function clear_auth(): void {
         $this->current_user = null;
         $this->auth_data = null;
+    }
+
+    /**
+     * Obtener JWT desde header Authorization
+     *
+     * @return string JWT o string vacío
+     */
+    private function get_jwt_from_header(): string {
+        $auth_header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+
+        if (empty($auth_header)) {
+            $auth_header = getallheaders()['Authorization'] ?? '';
+        }
+
+        if (empty($auth_header)) {
+            return '';
+        }
+
+        // Formato: "Bearer {jwt_token}"
+        if (preg_match('/Bearer\s+(.+)/', $auth_header, $matches)) {
+            return trim($matches[1]);
+        }
+
+        return '';
+    }
+
+    /**
+     * Generar tokens JWT para un usuario
+     *
+     * @param int   $user_id ID del usuario
+     * @param array $extra_data Datos adicionales para el token
+     * @return array Array con access_token y refresh_token
+     */
+    public function generate_jwt_tokens(int $user_id, array $extra_data = []): array {
+        $jwt_handler = new JWT_Handler();
+
+        $access_token = $jwt_handler->generate_access_token($user_id, $extra_data);
+        $refresh_token = $jwt_handler->generate_refresh_token($user_id);
+
+        return [
+            'access_token' => $access_token,
+            'refresh_token' => $refresh_token,
+            'expires_in' => $jwt_handler->get_token_lifetime(),
+            'token_type' => 'Bearer',
+        ];
+    }
+
+    /**
+     * Refrescar un access token usando un refresh token
+     *
+     * @param string $refresh_token Refresh token
+     * @return array|false Nuevos tokens o false si falla
+     */
+    public function refresh_jwt_token(string $refresh_token) {
+        $jwt_handler = new JWT_Handler();
+
+        // Verificar refresh token
+        $user_id = $jwt_handler->verify_refresh_token($refresh_token);
+
+        if ($user_id === false) {
+            return false;
+        }
+
+        // Generar nuevos tokens
+        return $this->generate_jwt_tokens($user_id);
+    }
+
+    /**
+     * Invalidar un JWT (logout)
+     *
+     * @param string $token Token a invalidar
+     * @return bool True si se invalidó correctamente
+     */
+    public function logout_jwt(string $token): bool {
+        $jwt_handler = new JWT_Handler();
+
+        return $jwt_handler->invalidate_token($token);
+    }
+
+    /**
+     * Verificar un JWT sin autenticar al usuario
+     *
+     * @param string $token Token JWT
+     * @return array|false Payload del token o false si es inválido
+     */
+    public function verify_jwt(string $token) {
+        $jwt_handler = new JWT_Handler();
+
+        return $jwt_handler->decode($token);
     }
 }
