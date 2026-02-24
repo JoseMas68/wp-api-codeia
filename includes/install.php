@@ -186,7 +186,45 @@ class Install {
                     'max_age' => 86400,
                 ],
             ],
-            'endpoints' => [],
+            'endpoints' => [
+                'posts' => [
+                    'slug' => 'posts',
+                    'name' => 'Posts',
+                    'description' => 'Endpoint para publicaciones de WordPress',
+                    'versions' => [
+                        'v1' => [
+                            'post_types' => ['post'],
+                            'methods' => ['GET'],
+                            'auth' => 'api_key',
+                            'fields' => [
+                                'include' => ['id', 'title', 'content', 'excerpt', 'date', 'link', 'author'],
+                                'exclude' => [],
+                            ],
+                            'query_params' => [
+                                'allowed' => ['page', 'per_page', 'search', 'orderby', 'order'],
+                                'defaults' => [
+                                    'per_page' => 10,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'pages' => [
+                    'slug' => 'pages',
+                    'name' => 'Pages',
+                    'description' => 'Endpoint para páginas de WordPress',
+                    'versions' => [
+                        'v1' => [
+                            'post_types' => ['page'],
+                            'methods' => ['GET'],
+                            'auth' => 'api_key',
+                            'fields' => [
+                                'include' => ['id', 'title', 'content', 'excerpt', 'date', 'link'],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
             'auth' => [
                 'api_keys' => [
                     'enabled' => true,
