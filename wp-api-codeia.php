@@ -1,17 +1,20 @@
 <?php
 /**
  * Plugin Name: WP API Codeia
- * Plugin URI: https://github.com/tu-usuario/wp-api-codeia
- * Description: Un plugin de WordPress para [descripción breve].
+ * Plugin URI: https://github.com/wp-api-codeia/wp-api-codeia
+ * Description: Transforma WordPress en una API headless configurable, versionada y gobernable desde el admin.
  * Version: 1.0.0
- * Author: Tu Nombre
- * Author URI: https://tu-sitio-web.com
+ * Author: WP API Codeia Team
+ * Author URI: https://wp-api-codeia.com
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: wp-api-codeia
  * Domain Path: /languages
- * Requires at least: 5.0
- * Requires PHP: 7.4
+ * Requires at least: 6.0
+ * Requires PHP: 8.2
+ *
+ * @package WP_API_Codeia
+ * @version 1.0.0
  */
 
 // Si se accede directamente a este archivo, abortar.
@@ -19,33 +22,119 @@ if (!defined('WPINC')) {
     die;
 }
 
-// Definir la versión del plugin
+// Definir constantes del plugin
 define('WP_API_CODEIA_VERSION', '1.0.0');
-
-// Definir la ruta del plugin
 define('WP_API_CODEIA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_API_CODEIA_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('WP_API_CODEIA_PLUGIN_BASENAME', plugin_basename(__FILE__));
+define('WP_API_CODEIA_NAMESPACE', 'wp-api-codeia');
+define('WP_API_CODEIA_BASE_PATH', '/api');
+
+// Rutas de carpetas principales
+define('WP_API_CODEIA_INCLUDES_DIR', WP_API_CODEIA_PLUGIN_DIR . 'includes/');
+define('WP_API_CODEIA_ADMIN_DIR', WP_API_CODEIA_PLUGIN_DIR . 'admin/');
+define('WP_API_CODEIA_TEMPLATES_DIR', WP_API_CODEIA_PLUGIN_DIR . 'templates/');
+define('WP_API_CODEIA_ASSETS_URL', WP_API_CODEIA_PLUGIN_URL . 'assets/');
 
 /**
- * Código principal del plugin
+ * Autoloader de clases del plugin
+ *
+ * @param string $class Nombre de la clase a cargar
+ * @return void
  */
+function wp_api_codeia_autoloader($class) {
+    // Prefijo del namespace del plugin
+    $prefix = 'WP_API_Codeia\\';
 
-// Activación del plugin
-register_activation_hook(__FILE__, 'wp_api_codeia_activate');
+    // Verificar si la clase usa nuestro namespace
+    $len = strlen($prefix);
+    if (strncmp($prefix, $class, $len) !== 0) {
+        return;
+    }
+
+    // Obtener el nombre relativo de la clase
+    $relative_class = substr($class, $len);
+
+    // Convertir namespace a ruta de archivo
+    $file = WP_API_CODEIA_INCLUDES_DIR .
+            str_replace('\\', '/', strtolower($relative_class)) .
+            '.php';
+
+    // Si el archivo existe, requerirlo
+    if (file_exists($file)) {
+        require_once $file;
+    }
+}
+
+// Registrar autoloader
+spl_autoload_register('wp_api_codeia_autoloader');
+
+/**
+ * Cargar el plugin
+ *
+ * @return void
+ */
+function wp_api_codeia_load() {
+    // Cargar funciones helper
+    require_once WP_API_CODEIA_INCLUDES_DIR . 'utils/helper-functions.php';
+
+    // Inicializar el plugin principal
+    $plugin = \WP_API_Codeia\Bootstrap::get_instance();
+    $plugin->init();
+}
+
+// Iniciar el plugin
+wp_api_codeia_load();
+
+/**
+ * Activación del plugin
+ *
+ * @return void
+ */
 function wp_api_codeia_activate() {
-    // Acciones de activación
-    // Por ejemplo: crear tablas en la base de datos, configurar opciones, etc.
-}
+    // Crear tablas personalizadas
+    \WP_API_Codeia\Install::create_tables();
 
-// Desactivación del plugin
-register_deactivation_hook(__FILE__, 'wp_api_codeia_deactivate');
+    // Establecer configuración por defecto
+    \WP_API_Codeia\Install::set_default_options();
+
+    // Limpiar rewrite rules
+    flush_rewrite_rules();
+
+    // Crear API key por defecto para administradores
+    $admin_users = get_users(['role' => 'administrator']);
+    if (!empty($admin_users)) {
+        foreach ($admin_users as $admin) {
+            \WP_API_Codeia\Repositories\Auth_Key_Repository::create_default_key($admin->ID);
+        }
+    }
+}
+register_activation_hook(__FILE__, 'wp_api_codeia_activate');
+
+/**
+ * Desactivación del plugin
+ *
+ * @return void
+ */
 function wp_api_codeia_deactivate() {
-    // Acciones de desactivación
-    // Por ejemplo: limpiar datos temporales, etc.
-}
+    // Limpiar rewrite rules
+    flush_rewrite_rules();
 
-// Inicialización del plugin
-add_action('plugins_loaded', 'wp_api_codeia_init');
-function wp_api_codeia_init() {
-    // Inicializar componentes del plugin
+    // Limpiar transients del plugin
+    wp_api_codeia_clear_all_transients();
 }
+register_deactivation_hook(__FILE__, 'wp_api_codeia_deactivate');
+
+/**
+ * Desinstalación del plugin
+ *
+ * @return void
+ */
+function wp_api_codeia_uninstall() {
+    // Eliminar tablas personalizadas
+    \WP_API_Codeia\Install::drop_tables();
+
+    // Eliminar opciones del plugin
+    \WP_API_Codeia\Install::delete_options();
+}
+register_uninstall_hook(__FILE__, 'wp_api_codeia_uninstall');
